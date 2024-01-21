@@ -3,5 +3,5 @@
 
 # But not these files...
 !/ProjectFolder1/
-!/FIREBEETLE_Dongle_RW/
+!/FIREBEETLE_Dongle_RW/*
 !.gitignore
