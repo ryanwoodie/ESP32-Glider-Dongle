@@ -5,4 +5,8 @@
 !/ProjectFolder1/
 !/FIREBEETLE_Dongle_RW/
 !/FIREBEETLE_Dongle_RW/*
+!/Dongle_Seeed_ESP32S3/
+!/Dongle_Seeed_ESP32S3/*
+!/ESP32_WROOM_PK/
+!/ESP32_WROOM_PK/*
 !.gitignore
