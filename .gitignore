@@ -1,0 +1,7 @@
+# Ignore everything
+*
+
+# But not these files...
+!/ProjectFolder1/
+!/ProjectFolder2/
+!.gitignore
