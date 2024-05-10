@@ -1,4 +1,5 @@
-// Used with Firebeetle ESP32 WROOOM Board
+// wifi password, BT password, serial speeds
+//green gnd, org,brn,ble
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <BLEDevice.h>
@@ -7,12 +8,12 @@
 #include <BLE2902.h>
 #include <BluetoothSerial.h>
 #include <Preferences.h>
-#include "esp_system.h" 
+#include "esp_system.h"
 
-#define GPS_RX_PIN 0 // GPIO pin number for GPS RX white USB wire
-#define GPS_TX_PIN 1 // GPIO pin number for GPS TX green USB wire
-#define VARIO_RX_PIN 2// GPIO pin number for Vario RX
-#define VARIO_TX_PIN 3 // GPIO pin number for Vario TX
+#define GPS_RX_PIN 26 // GPIO pin number for GPS RX white USB wire
+#define GPS_TX_PIN 27 // GPIO pin number for GPS TX green USB wire
+#define VARIO_RX_PIN 5// GPIO pin number for Vario RX
+#define VARIO_TX_PIN 2 // GPIO pin number for Vario TX
 #define SERVICE_UUID        "0000FFE0-0000-1000-8000-00805F9B34FB"
 #define CHARACTERISTIC_UUID "0000FFE1-0000-1000-8000-00805F9B34FB"
 //#define DEVICE_INFORMATION_SERVICE_UUID "0000180A-0000-1000-8000-00805F9B34FB"
@@ -35,6 +36,7 @@ String dataToSend = "";
 String dataFromExternal = "";
 String ble_external = "";
 String BLEclientData = ""; // Global string to store received data
+String BLEclientDataNoVario = ""; // Global string to store received data
 bool isSendingData = false;
 unsigned long reconnectIntervals[] = {1000,5000,10000, 30000, 60000, 120000, 300000};
 size_t currentIntervalIndex = 0;
@@ -81,7 +83,7 @@ DeviceSettings settings() {
   mac.replace(":", ""); // Remove colons from the MAC address
   String fallbackName = "ESP32_" + mac;
 
-  deviceSettings.wifi = preferences.getBool("wifi", true);
+  deviceSettings.wifi = preferences.getBool("wifi", false);
   deviceSettings.ble = preferences.getBool("ble", false);
   deviceSettings.bt = preferences.getBool("bt", true);
   deviceSettings.ble_client = preferences.getBool("ble_client", false);
@@ -91,7 +93,7 @@ DeviceSettings settings() {
   deviceSettings.variobaud = preferences.getInt("variobaud", 9600);
   deviceSettings.gps_tx = preferences.getBool("gps-tx", true);
   deviceSettings.vario_uart = preferences.getBool("vario-uart", true);
-  deviceSettings.bleclientname = preferences.getString("bleclientname", "SoftRF-e08c41-LE");
+  deviceSettings.bleclientname = preferences.getString("bleclientname", "SoftRF-d08c41-LE");
   deviceSettings.btpassword = preferences.getInt("btpassword", 1234);
 
   preferences.end();
@@ -101,16 +103,22 @@ DeviceSettings settings() {
 DeviceSettings deviceSettings;
 
  class MyCharacteristicCallback : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic *pCharacteristic)  {
-      std::string rxValue = pCharacteristic->getValue();
-      if (rxValue.length() > 0) {
-        ble_external="";
-        for (int i = 0; i < rxValue.length(); i++){
-          ble_external +=(char)rxValue[i];
-        }
-      }
-    }
+void onWrite(BLECharacteristic *pCharacteristic) {
+    std::string rxValue = pCharacteristic->getValue();
+    if (rxValue.length() > 0) {
+        for (int i = 0; i < rxValue.length(); i++) {
+            char currentChar = (char)rxValue[i];
+            ble_external += currentChar;
 
+            if (currentChar == '\n') {
+              ble_external.trim();
+              sendExternalData(ble_external);
+                //Serial.println(ble_external);
+              ble_external = "";
+            }
+        }
+    }
+}
 }; 
 
 class MyServerCallbacks: public BLEServerCallbacks {
@@ -135,12 +143,15 @@ static void notifyCallback(
         BLEclientData += currentChar;
 
         if (currentChar == '\n') {
+          
           BLEclientData.trim();
+          BLEclientDataNoVario += BLEclientData;
    if (BLEclientData.startsWith("$GN")) {
   BLEclientData = "$GP" + BLEclientData.substring(3);
   BLEclientData = recalculateChecksum(BLEclientData);
 }
    varioSerial->println(BLEclientData);
+   
    if(deviceSettings.name == "BLE2SERIAL"){
      Serial.println(BLEclientData);
    }
@@ -362,6 +373,12 @@ String getData() {
     }
   }
 
+if (BLEclientDataNoVario && !dataFromVarioAvailable)
+{
+  dataToSend = BLEclientDataNoVario;
+  BLEclientDataNoVario = "";
+}
+
   // Read data from Vario (UART2)
   if (varioSerial->available()) {
     String dataFromVario = varioSerial->readStringUntil('\n') + '\n';
@@ -499,6 +516,7 @@ bool parseBoolValue(String value) {
 
 String updateSettings(String data) {
   String dataToSend = "";
+  String dataCased = data;
   data.toLowerCase();
   if (data.startsWith("reboot")) {
   esp_restart(); // Restart the ESP32
@@ -508,10 +526,12 @@ String updateSettings(String data) {
     int secondSpace = data.indexOf(' ', firstSpace + 1);
     String command;
     String value;
+    String valueCased;
 
     if (secondSpace != -1) {
       command = data.substring(firstSpace + 1, secondSpace);
       value = data.substring(secondSpace + 1);
+      valueCased = dataCased.substring(secondSpace + 1);
     } else {
       command = data.substring(firstSpace + 1);
     }
@@ -523,11 +543,15 @@ String updateSettings(String data) {
       preferences.putBool(command.c_str(), boolValue);
       dataToSend += "Updated " + command + " value: " + String(boolValue) + "\n";
       sendData("settings update");
-    } else if (command == "name" || command == "bleclientname") {
+    } else if (command == "name") {
       String sanitizedName = sanitizeName(value, 20);
       preferences.putString(command.c_str(), sanitizedName.c_str());
       dataToSend += "Updated " + command + " value: " + sanitizedName + "\n";
-      sendData("name update");
+      sendData("device name update");
+    } else if (command == "bleclientname") {
+      preferences.putString(command.c_str(), valueCased.c_str());
+      dataToSend += "Updated " + command + " value: " + valueCased + "\n";
+      sendData("bleclient name update");
     } else if (command == "serialbaud" || command == "gpsbaud" || command == "variobaud" || command == "btpassword") {
       int intValue = value.toInt();
       preferences.putInt(command.c_str(), intValue);
